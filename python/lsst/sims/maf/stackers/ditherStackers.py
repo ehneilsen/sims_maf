@@ -991,9 +991,6 @@ class RandomRotDitherPerFilterChangeStacker(BaseDitherStacker):
 
     def __init__(self, rotTelCol= 'rotTelPos', filterCol= 'filter', degrees=True,
                  maxDither= 90., maxRotAngle=90, minRotAngle=-90, randomSeed=None):
-        """
-        @ MaxDither in degrees.
-        """
         # Instantiate the RandomDither object and set internal variables.
         self.rotTelCol = rotTelCol
         self.filterCol = filterCol
@@ -1001,14 +998,21 @@ class RandomRotDitherPerFilterChangeStacker(BaseDitherStacker):
         self.maxDither = maxDither
         self.maxRotAngle = maxRotAngle
         self.minRotAngle = minRotAngle
+        self.dithRange = np.min([self.maxDither, (self.maxRotAngle - self.minRotAngle)])
+        self.dithMin = np.max([-self.maxDither, self.minRotAngle])
         self.randomSeed = randomSeed
         # self.units used for plot labels
         if self.degrees:
             self.units = ['deg']
         else:
             self.units = ['rad']
+            self.maxRotAngle = np.radians(self.maxRotAngle)
+            self.minRotAngle = np.radians(self.minRotAngle)
         # Values required for framework operation: this specifies the data columns required from the database.
         self.colsReq = [self.rotTelCol, self.filterCol]
+
+    def _pick_random_dith(self, npoints):
+        return np.random.rand(npoints) * 2.0 * self.dithRange + self.dithMin
 
     def _run(self, simData, cols_present=False):
         # Just go ahead and return if the columns were already in place.
@@ -1021,31 +1025,47 @@ class RandomRotDitherPerFilterChangeStacker(BaseDitherStacker):
         # Identify points where the filter changes.
         changeIdxs = np.where(simData[self.filterCol][1:] != simData[self.filterCol][:-1])[0]
 
+        # If there were no filter changes, then simply return the original rotTelPos values.
         if len(changeIdxs) == 0:
-            rotOffset = 0
+            simData[rotDither] = simData[self.rotTelCol]
+            return simData
 
+        # Or calculate new rotationally dithered rotTelCol values (in degrees here).
+        rotDither = np.zeros(len(simData), float)
+        if self.degrees:
+            rotDither += simData[self.rotTelCol]
         else:
-            # Calculate random offsets between +/- self.maxDither  -- in degrees.
-            randomOffsets = np.random.rand(len(changeIdxs)) * 2.0 * self.maxDither - self.maxDither
+            rotDither += np.degrees(simData[self.rotTelCol])
+        # For the observations in each filter, add the offset
+        for i, (c, cn) in enumerate(zip(changeIdxs, changeIdxs[1:])):
+            # Calculate a value to set the rotTelCol value to.
+            randomDith = self._pick_random_dith(1)
+            # Calculate the offset required from the current rotTelCol values.
+            offset = randomDith - rotDither[c]
+            # Add the offset.
+            rotDither[c+1:cn+1] += offset
+            # Check if any values went out of range.
+            overIdx = np.where(rotDither > self.maxRotAngle)[0]
+            loop_counter = 0
+            while (len(overIdx) > 0 and loop_counter < 10):
+                # Had some values which were over the limit, so let's change
+                # the offset at the first of those points and try again.
+                rotDither[overIdx[0]:cn+1] -= offset
+                randomDith = self._pick_random_dith(1)
+                offset = randomDith - rotDither[overIdx[0]]
+                rotDither[overIdx[0]:cn+1] += offset
+                overIdx = np.where(rotDither > self.maxRotAngle)[0]
+                loop_counter += 1
 
-            rotOffset = np.zeros(len(simData), float)
-            for i, (c, cn) in enumerate(zip(changeIdxs, changeIdxs[1:])):
-                rotOffset[c+1:cn+1] = randomOffsets[i]
-            rotOffset[changeIdxs[-1]+1:] = randomOffsets[-1]
+        # Because we put in the loop counter to avoid infinite loops (can happen if you have
+        # a very small maxDither and end up way outside maxRotAngle for some reason):
+        rotDither = np.where(rotDither > self.maxRotAngle, self.maxRotAngle, rotDither)
+        rotDither = np.where(rotDither < self.minRotAngle, self.minRotAngle, rotDither)
 
         # Add the random offsets to the RotTelPos values and convert to radians if required.
         if not self.degrees:
-            rotOffset = np.radians(rotOffset)
-        rotDither = 'randomDitherPerFilterChangeRotTelPos'
-        simData[rotDither] = simData[self.rotTelCol] + rotOffset
+            rotDither = np.radians(rotDither)
+        rotDitherCol = 'randomDitherPerFilterChangeRotTelPos'
+        simData[rotDitherCol] = rotDither
 
-        # BUT the camera rotator cannot go further than +/- 90 degrees.
-        # Without a better alternative, let's just cut off any values which exceed this range.
-        maxRotTelPos = self.maxRotAngle
-        minRotTelPos = self.minRotAngle
-        if not self.degrees:
-            maxRotTelPos = np.radians(maxRotTelPos)
-            minRotTelPos = np.radians(minRotTelPos)
-        simData[rotDither] = np.where(simData[rotDither] > maxRotTelPos, maxRotTelPos, simData[rotDither])
-        simData[rotDither] = np.where(simData[rotDither] < minRotTelPos, minRotTelPos, simData[rotDither])
         return simData

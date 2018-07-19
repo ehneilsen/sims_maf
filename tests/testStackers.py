@@ -260,6 +260,13 @@ class TestStackerClasses(unittest.TestCase):
         randomDithers = data['randomDitherPerFilterChangeRotTelPos']
         rotOffsets = rotTelPos - randomDithers
         self.assertEqual(rotOffsets[0], 0)
+        # Test that only change angle at filter changes -- need to be sure haven't run into 'edges'
+        stacker = stackers.RandomRotDitherPerFilterChangeStacker(maxDither=10, degrees=True,
+                                                                 randomSeed=99)
+        data = stacker.run(odata)
+        randomDithers = data['randomDitherPerFilterChangeRotTelPos']
+        rotOffsets = rotTelPos - randomDithers
+        self.assertEqual(rotOffsets[0], 0)
         offsetChanges = np.where(rotOffsets[1:] != rotOffsets[:-1])[0]
         filtChanges = np.where(filt[1:] != filt[:-1])[0]
         # Don't count last offset change because this was just value to force min/max limit.
