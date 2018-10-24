@@ -55,14 +55,14 @@ def setupSlicer(orbitFile, Hrange, obsFile=None):
     ~lsst.sims.maf.slicer.MoObjSlicer
     """
     # Read the orbit file and set the H values for the slicer.
-    slicer = slicers.MoObjSlicer()
-    slicer.readOrbits(orbitFile, Hrange=Hrange)
+    slicer = slicers.MoObjSlicer(Hrange=Hrange)
+    slicer.readOrbits(orbitFile)
     if obsFile is not None:
         slicer.readObs(obsFile)
     return slicer
 
 
-def setupMetrics(slicer, runName, metadata, mParams, albedo=None, Hmark=None):
+def setupMetrics(slicer, runName, metadata, mParams, albedo=None, Hmark=20.):
     """
     Set up the standard metrics to analyze each opsim run.
 
@@ -78,7 +78,7 @@ def setupMetrics(slicer, runName, metadata, mParams, albedo=None, Hmark=None):
         Dictionary containing 'nyears', 'bins', and 'windows' to configure the discovery and activity metrics.
     albedo : float, optional
         Albedo to specify for the plotting dictionary. Default None (and so no 'size' marked on plots).
-    Hmark : float, optional
+    Hmark : float (20.)
         Hmark to specify for the plotting dictionary. Default None.
 
     Returns
@@ -1204,7 +1204,7 @@ def plotMetrics(allBundles, outDir, metadata, runName, mParams, Hmark=None, resu
         for strategy in strategies:
             completeness_at_year[strategy] = np.zeros(len(yrs), float)
             completeness_at_year[strategy][0] = 0
-        b = allBundles[k].values()[0]
+        b = list(allBundles[k].values())[0]
         # Pick a point to 'count' the completeness at.
         if Hmark is not None:
             hIdx = np.abs(b.slicer.Hrange - Hmark).argmin()
@@ -1254,7 +1254,7 @@ def plotMetrics(allBundles, outDir, metadata, runName, mParams, Hmark=None, resu
             for strategy in strategies:
                 completeness_at_year[strategy] = np.zeros(len(yrs), float)
                 completeness_at_year[strategy][0] = 0
-            b = allBundles[k].values()[0]
+            b = list(allBundles[k].values())[0]
             # Pick a point to 'count' the completeness at.
             if Hmark is not None:
                 hIdx = np.abs(b.slicer.Hrange - Hmark).argmin()
@@ -1300,7 +1300,7 @@ def plotMetrics(allBundles, outDir, metadata, runName, mParams, Hmark=None, resu
         strategies = ['3 pairs in 12 nights', '3 pairs in 15 nights', '3 pairs in 20 nights',
                       '3 pairs in 25 nights', '3 pairs in 30 nights']
         nyr = mParams['nyears'].max()
-        b = allBundles[k].values()[0]
+        b = list(allBundles[k].values())[0]
         # Pick a point to 'count' the completeness at.
         if Hmark is not None:
             hIdx = np.abs(b.slicer.Hrange - Hmark).argmin()
@@ -1477,7 +1477,7 @@ if __name__ == '__main__':
                         help="Base string to add to all metric metadata. Typically the object type.")
     parser.add_argument("--albedo", type=float, default=None,
                         help="Albedo value, to add diameters to upper scales on plots. Default None.")
-    parser.add_argument("--hMark", type=float, default=None,
+    parser.add_argument("--hMark", type=float, default=20.,
                         help="Add vertical lines at H=hMark on plots. Default None.")
     parser.add_argument("--nYearsMax", type=int, default=10,
                         help="Maximum number of years out to which to evaluate completeness."
