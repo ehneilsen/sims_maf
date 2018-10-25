@@ -1398,7 +1398,7 @@ def plotMetrics(allBundles, outDir, metadata, runName, mParams, Hmark=None, resu
               '%s r-i color' % metadata: 'burlywood',
               '%s i-z color' % metadata: 'magenta',
               '%s z-y color' % metadata: 'k'}
-    b = allBundles['colorDetermination'].values()[0]
+    b = list(allBundles['colorDetermination'].values())[0]
     caption = 'Mean likelihood of obtaining observations suitable for gathering a high-quality color '
     caption += 'measurement, as a function of H magnitude. '
     caption += 'Assumes that if %d pair(s) of observations are taken within %.2f hours, with SNR>%.2f, ' \
