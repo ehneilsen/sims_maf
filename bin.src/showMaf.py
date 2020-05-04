@@ -3,11 +3,14 @@
 from __future__ import print_function
 import os
 import argparse
+import socket
 from tornado import ioloop
 from tornado import web
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
 import webbrowser
+from tornado.httpserver import HTTPServer
+from tornado.netutil import bind_unix_socket
 
 from lsst.sims.maf.web import MafTracking
 from lsst.sims.maf.db import addRunToDatabase
@@ -135,6 +138,8 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--port", type=int, default=8888, help="Port for connecting to showMaf.")
     parser.add_argument("--noBrowser", dest='noBrowser', default=False,
                         action='store_true', help="Do not open a new browser tab")
+    parser.add_argument("-u", "--unix_socket", type=str, default='',
+                        help="UNIX socket to bind to.")
 
     args = parser.parse_args()
 
@@ -174,8 +179,24 @@ if __name__ == "__main__":
 
     # Start up tornado app.
     application = make_app()
-    application.listen(args.port)
-    print('Tornado Starting: \nPoint your web browser to http://localhost:%d/ \nCtrl-C to stop' % (args.port))
-    if not args.noBrowser:
-        webbrowser.open_new_tab('http://localhost:%d' % (args.port))
+
+    if args.unix_socket=='':
+        # Original branch
+        application.listen(args.port)
+        print('Tornado Starting: \nPoint your web browser to http://localhost:%d/ \nCtrl-C to stop' % (args.port))
+        if not args.noBrowser:
+            webbrowser.open_new_tab('http://localhost:%d' % (args.port))
+    else:
+        unix_socket_path = os.path.abspath(args.unix_socket)
+        server = HTTPServer(application)
+        server_socket = bind_unix_socket(unix_socket_path)
+        server.add_socket(server_socket)
+        if not args.noBrowser:
+            print("Not opening web browser; use ssh port forwarding, and connect to the destination of the forward")
+        print(f"Running web server on UNIX domain port {unix_socket_path}")
+        print("To see the page, use ssh to forward this port to an IP port, for example:")
+        print(f"$ ssh -L 127.0.0.1:8888:{unix_socket_path} {socket.gethostname()}")
+        print("Then connect to http://127.0.0.1:8888 from the host running the ssh client")
+
     ioloop.IOLoop.instance().start()
+            
