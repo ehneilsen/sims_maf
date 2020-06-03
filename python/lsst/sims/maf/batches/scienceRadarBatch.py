@@ -4,10 +4,12 @@ from lsst.sims.utils import hpid2RaDec, angularSeparation
 import lsst.sims.maf.metrics as metrics
 import lsst.sims.maf.slicers as slicers
 import lsst.sims.maf.plots as plots
+import lsst.sims.maf.maps as maps
 import lsst.sims.maf.metricBundles as mb
 from .common import standardSummary, filterList, combineMetadata
 from .colMapDict import ColMapDict
 from .srdBatch import fOBatch, astrometryBatch, rapidRevisitBatch
+
 
 __all__ = ['scienceRadarBatch']
 
@@ -23,7 +25,9 @@ def scienceRadarBatch(colmap=None, runName='opsim', extraSql=None, extraMetadata
     """
     # Hide dependencies
     from mafContrib.LSSObsStrategy.galaxyCountsMetric_extended import GalaxyCountsMetric_extended
-    from mafContrib import Plasticc_metric, plasticc_slicer, load_plasticc_lc, TDEsAsciiMetric
+    from mafContrib import (Plasticc_metric, plasticc_slicer, load_plasticc_lc,
+                            TdePopMetric, generateTdePopSlicer,
+                            generateMicrolensingSlicer, MicrolensingMetric)
 
     if colmap is None:
         colmap = ColMapDict('fbs')
@@ -186,43 +190,42 @@ def scienceRadarBatch(colmap=None, runName='opsim', extraSql=None, extraMetadata
 
     # Tidal Disruption Events
     displayDict['subgroup'] = 'TDE'
-    displayDict['caption'] = 'Fraction of TDE lightcurves that could be identified, outside of DD fields'
-    detectSNR = {'u': 5, 'g': 5, 'r': 5, 'i': 5, 'z': 5, 'y': 5}
+    displayDict['caption'] = 'TDE lightcurves that could be identified'
 
-    # light curve parameters
-    epochStart = -22
-    peakEpoch = 0
-    nearPeakT = 10
-    postPeakT = 14  # two weeks
-    nPhaseCheck = 1
-
-    # condition parameters
-    nObsTotal = {'u': 0, 'g': 0, 'r': 0, 'i': 0, 'z': 0, 'y': 0}
-    nObsPrePeak = 1
-    nObsNearPeak = {'u': 0, 'g': 0, 'r': 0, 'i': 0, 'z': 0, 'y': 0}
-    nFiltersNearPeak = 3
-    nObsPostPeak = 0
-    nFiltersPostPeak = 2
-
-    metric = TDEsAsciiMetric(asciifile=None,
-                             detectSNR=detectSNR, epochStart=epochStart, peakEpoch=peakEpoch,
-                             nearPeakT=nearPeakT, postPeakT=postPeakT, nPhaseCheck=nPhaseCheck,
-                             nObsTotal=nObsTotal, nObsPrePeak=nObsPrePeak,
-                             nObsNearPeak=nObsNearPeak, nFiltersNearPeak=nFiltersNearPeak,
-                             nObsPostPeak=nObsPostPeak, nFiltersPostPeak=nFiltersPostPeak)
-    slicer = slicers.HealpixSlicer(nside=32)
-    sql = extraSql + joiner + "note not like '%DD%'"
-    md = extraMetadata
-    if md is None:
-        md = " NonDD"
-    else:
-        md += 'NonDD'
-    bundle = mb.MetricBundle(metric, slicer, sql, runName=runName, summaryMetrics=standardStats,
-                             plotFuncs=plotFuncs, metadata=md,
+    metric = TdePopMetric()
+    slicer = generateTdePopSlicer()
+    sql = ''
+    plotDict = {'reduceFunc': np.sum, 'nside': 128}
+    plotFuncs = [plots.HealpixSkyMap()]
+    bundle = mb.MetricBundle(metric, slicer, sql, runName=runName,
+                             plotDict=plotDict, plotFuncs=plotFuncs,
+                             summaryMetrics=[metrics.MeanMetric(maskVal=0)],
                              displayDict=displayDict)
     bundleList.append(bundle)
 
-    # XXX -- would be good to add some microlensing events, for both MW and LMC/SMC.
+
+    # Microlensing events
+    displayDict['subgroup'] = 'Microlensing'
+    displayDict['caption'] = 'Fast microlensing events'
+
+    plotDict = {'nside': 128}
+    sql = ''
+    slicer = generateMicrolensingSlicer(min_crossing_time=1, max_crossing_time=10)
+    metric = MicrolensingMetric(metricName='Fast Microlensing')
+    bundle = mb.MetricBundle(metric, slicer, sql, runName=runName,
+                             summaryMetrics=[metrics.MeanMetric(maskVal=0)],
+                             plotFuncs=[plots.HealpixSkyMap()], metadata=extraMetadata,
+                             displayDict=displayDict, plotDict=plotDict)
+    bundleList.append(bundle)
+
+    displayDict['caption'] = 'Slow microlensing events'
+    slicer = generateMicrolensingSlicer(min_crossing_time=100, max_crossing_time=1500)
+    metric = MicrolensingMetric(metricName='Slow Microlensing')
+    bundle = mb.MetricBundle(metric, slicer, sql, runName=runName,
+                             summaryMetrics=[metrics.MeanMetric(maskVal=0)],
+                             plotFuncs=[plots.HealpixSkyMap()], metadata=extraMetadata,
+                             displayDict=displayDict, plotDict=plotDict)
+    bundleList.append(bundle)
 
     #########################
     # Milky Way
@@ -232,20 +235,42 @@ def scienceRadarBatch(colmap=None, runName='opsim', extraSql=None, extraMetadata
 
     displayDict['subgroup'] = 'N stars'
     slicer = slicers.HealpixSlicer(nside=nside, useCache=False)
-    sum_stats = [metrics.SumMetric(metricName='Total N Stars')]
+    sum_stats = [metrics.SumMetric(metricName='Total N Stars, crowding')]
     for f in filterlist:
+        stellar_map = maps.StellarDensityMap(filtername=f)
         displayDict['order'] = filterorders[f]
         displayDict['caption'] = 'Number of stars in %s band with an measurement error due to crowding ' \
-                                 'of less than 0.1 mag' % f
+                                 'of less than 0.2 mag' % f
         # Configure the NstarsMetric - note 'filtername' refers to the filter in which to evaluate crowding
-        metric = metrics.NstarsMetric(crowding_error=0.1, filtername='r',
-                                      seeingCol=colmap['seeingGeom'], m5Col=colmap['fiveSigmaDepth'])
+        metric = metrics.NstarsMetric(crowding_error=0.2, filtername=f, ignore_crowding=False,
+                                      seeingCol=colmap['seeingGeom'], m5Col=colmap['fiveSigmaDepth'],
+                                      maps=[])
         plotDict = {'nTicks': 5, 'logScale': True, 'colorMin': 100}
         bundle = mb.MetricBundle(metric, slicer, filtersqls[f], runName=runName,
                                  summaryMetrics=sum_stats,
                                  plotFuncs=subsetPlots, plotDict=plotDict,
-                                 displayDict=displayDict)
+                                 displayDict=displayDict, mapsList=[stellar_map])
         bundleList.append(bundle)
+
+
+    slicer = slicers.HealpixSlicer(nside=nside, useCache=False)
+    sum_stats = [metrics.SumMetric(metricName='Total N Stars, no crowding')]
+    for f in filterlist:
+        stellar_map = maps.StellarDensityMap(filtername=f)
+        displayDict['order'] = filterorders[f]
+        displayDict['caption'] = 'Number of stars in %s band with an measurement error ' \
+                                 'of less than 0.2 mag, not considering crowding' % f
+        # Configure the NstarsMetric - note 'filtername' refers to the filter in which to evaluate crowding
+        metric = metrics.NstarsMetric(crowding_error=0.2, filtername=f, ignore_crowding=True,
+                                      seeingCol=colmap['seeingGeom'], m5Col=colmap['fiveSigmaDepth'],
+                                      metricName='Nstars_no_crowding', maps=[])
+        plotDict = {'nTicks': 5, 'logScale': True, 'colorMin': 100}
+        bundle = mb.MetricBundle(metric, slicer, filtersqls[f], runName=runName,
+                                 summaryMetrics=sum_stats,
+                                 plotFuncs=subsetPlots, plotDict=plotDict,
+                                 displayDict=displayDict, mapsList=[stellar_map])
+        bundleList.append(bundle)
+
 
     #########################
     # DDF
